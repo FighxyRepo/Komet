@@ -1,0 +1,6 @@
+name: komet_js_engine
+description: No-op stand-in for komet_js_engine used by the iOS App Store build (tool/build_ios_appstore.sh). Has no JS engine and no native code.
+publish_to: 'none'
+version: 1.0.0
+environment:
+  sdk: ^3.10.4

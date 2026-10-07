@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:fjs/fjs.dart';
+import 'package:komet_js_engine/komet_js_engine.dart';
 import 'package:path/path.dart' as p;
 
 import 'plugin_host.dart';
@@ -15,9 +15,7 @@ import 'plugin_storage.dart';
 class PluginRuntime {
   PluginRuntime._();
 
-  static Future<void>? _initialization;
-
-  static Future<void> initialize() => _initialization ??= LibFjs.init();
+  static Future<void> initialize() => KometJsSandbox.initialize();
 
   static Future<void> run(
     PluginCommandDescriptor command,
@@ -27,14 +25,12 @@ class PluginRuntime {
     final plugin = command.plugin;
     final storage = PluginStorage(plugin.manifest.id);
     final sentMessageIds = <String>{};
-    final engine = await JsEngine.create(
-      builtins: JsBuiltinOptions.none(),
-      runtimeOptions: JsEngineRuntimeOptions(
-        memoryLimit: BigInt.from(16 * 1024 * 1024),
-        gcThreshold: BigInt.from(4 * 1024 * 1024),
-        maxStackSize: BigInt.from(256 * 1024),
-        info: plugin.manifest.id,
-      ),
+    final engine = await KometJsSandbox.create(
+      info: plugin.manifest.id,
+      memoryLimit: 16 * 1024 * 1024,
+      gcThreshold: 4 * 1024 * 1024,
+      maxStackSize: 256 * 1024,
+      bridge: (value) => _bridge(plugin, host, storage, sentMessageIds, value),
     );
     var closed = false;
     Future<void> close() async {
@@ -44,41 +40,26 @@ class PluginRuntime {
     }
 
     try {
-      await engine.init(
-        bridge: (value) =>
-            _bridge(plugin, host, storage, sentMessageIds, value),
-      );
-      await engine.declareNewModule(
-        module: JsModule.code(module: 'komet:api', code: _apiModule),
-      );
       final sources = await plugin.loadModules();
       final prefix = 'plugin:${plugin.manifest.id}/';
-      await engine.declareNewModules(
-        modules: sources.entries
-            .map(
-              (entry) => JsModule.code(
-                module: '$prefix${entry.key}',
-                code: _rewriteImports(entry.value, prefix, entry.key),
-              ),
-            )
-            .toList(),
-      );
+      await engine.declareModules({
+        'komet:api': _apiModule,
+        for (final entry in sources.entries)
+          '$prefix${entry.key}': _rewriteImports(
+            entry.value,
+            prefix,
+            entry.key,
+          ),
+      });
       final moduleName = '$prefix${plugin.manifest.main}';
-      final call = engine.call(
-        module: moduleName,
-        method: command.command.handler,
-        params: [
-          JsValue.from({
-            'args': host.args,
-            'arguments': host.arguments,
-            'reply':
-                plugin.grantedPermissions.contains(PluginPermission.replyRead)
-                ? host.replyMessage
-                : null,
-            'apiVersion': kPluginApiVersion,
-          }),
-        ],
-      );
+      final call = engine.call(moduleName, command.command.handler, {
+        'args': host.args,
+        'arguments': host.arguments,
+        'reply': plugin.grantedPermissions.contains(PluginPermission.replyRead)
+            ? host.replyMessage
+            : null,
+        'apiVersion': kPluginApiVersion,
+      });
       await call.timeout(
         const Duration(seconds: 30),
         onTimeout: () async {
@@ -91,15 +72,14 @@ class PluginRuntime {
     }
   }
 
-  static Future<JsResult> _bridge(
+  static Future<Map<String, Object?>> _bridge(
     PluginDescriptor plugin,
     PluginHost host,
     PluginStorage storage,
     Set<String> sentMessageIds,
-    JsValue value,
+    Object? request,
   ) async {
     try {
-      final request = value.value;
       if (request is! Map) {
         throw const FormatException('Некорректный вызов API');
       }
@@ -146,9 +126,9 @@ class PluginRuntime {
         default:
           throw FormatException('Неизвестный метод API: $method');
       }
-      return JsResult.ok(JsValue.from({'ok': true, 'value': result}));
+      return {'ok': true, 'value': result};
     } catch (error) {
-      return JsResult.ok(JsValue.from({'ok': false, 'error': '$error'}));
+      return {'ok': false, 'error': '$error'};
     }
   }
 

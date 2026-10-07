@@ -117,7 +117,11 @@ dependencies:
   sensors_plus: ^7.1.0
   smart_auth: ^3.2.0
   flutter_svg: ^2.0.10
-  fjs: ^3.3.0
+  # JS sandbox for plugins (wraps fjs/QuickJS). The iOS App Store build swaps it
+  # for packages/komet_js_engine_stub via pubspec_overrides.yaml, so neither the
+  # engine nor its native pod is compiled in (see tool/build_ios_appstore.sh).
+  komet_js_engine:
+    path: packages/komet_js_engine
   cryptography: ^2.7.0
   local_auth: ^3.0.2
   visibility_detector: ^0.4.0+2

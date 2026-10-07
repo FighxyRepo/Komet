@@ -111,8 +111,7 @@ class SlashCommand {
 
   Future<void> execute(PluginCommandContext context) {
     final plugin = pluginCommand;
-    if (plugin != null) {
-      if (!BuildProfile.plugins) return Future.value();
+    if (BuildProfile.plugins && plugin != null) {
       return PluginRuntime.run(plugin, context);
     }
     return run?.call(context) ?? Future.value();

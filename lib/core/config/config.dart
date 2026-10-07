@@ -21,12 +21,17 @@ abstract class ServerConfig {
   static const Duration requestTimeout = Duration(seconds: 30);
   static const int maxReconnectAttempts = 50;
 
-  // #***! в dev адрес можно переопределить, в релизе всегда дефолтный
+  // #***! адрес можно переопределить там, где включён выбор сервера
+  // (BuildProfile.serverSelection), иначе всегда дефолтный
   static Future<({String host, int port, bool trustMincifryCa})>
   loadEndpoint() async {
     final prefs = await SharedPreferences.getInstance();
-    final rawHost = BuildProfile.devTools ? prefs.getString(prefHostKey) : null;
-    final rawPort = BuildProfile.devTools ? prefs.getInt(prefPortKey) : null;
+    final rawHost = BuildProfile.serverSelection
+        ? prefs.getString(prefHostKey)
+        : null;
+    final rawPort = BuildProfile.serverSelection
+        ? prefs.getInt(prefPortKey)
+        : null;
     final host = (rawHost != null && rawHost.trim().isNotEmpty)
         ? rawHost.trim()
         : defaultHost;

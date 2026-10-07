@@ -466,7 +466,7 @@ packages:
     source: hosted
     version: "1.1.1"
   fjs:
-    dependency: "direct main"
+    dependency: transitive
     description:
       name: fjs
       sha256: cd1a9e36dac80966bafcc222461b7ab314eda2160567429c9ac6c4d3120d93bc
@@ -988,6 +988,13 @@ packages:
       relative: true
     source: path
     version: "0.2.0"
+  komet_js_engine:
+    dependency: "direct main"
+    description:
+      path: "packages/komet_js_engine"
+      relative: true
+    source: path
+    version: "1.0.0"
   komet_tlottie:
     dependency: "direct main"
     description:

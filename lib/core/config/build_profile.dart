@@ -1,10 +1,12 @@
 import 'package:flutter/services.dart' show appFlavor;
 
-// #***! что включено в сборке, всё считается на компиляции из flavor
+// #***! что включено в сборке, всё считается на компиляции из flavor и
+// --dart-define=is_appstore_build=true (iOS App Store, см. CLAUDE.md)
 abstract final class BuildProfile {
   static const String storeFlavor = 'store';
 
-  // #***! store сборка урезана, без самообновления дев инструментов и спуфа
+  // #***! store сборка (Google Play) урезана, без самообновления дев
+  // инструментов и спуфа
   static const bool isStore = appFlavor == storeFlavor;
 
   /// App Store build, set with `--dart-define=is_appstore_build=true`.
@@ -19,26 +21,35 @@ abstract final class BuildProfile {
   /// from App Store builds.
   static const bool isAppStoreBuild = bool.fromEnvironment('is_appstore_build');
 
+  /// Any store build (Google Play `store` flavor or App Store). Dev tooling,
+  /// insecure transport, traffic capture, pranks, hidden content viewers and
+  /// IP lookups are left out of both.
+  static const bool isTrimmed = isStore || isAppStoreBuild;
+
   /// Plugins and their settings; built-in slash commands stay either way.
   static const bool plugins = !isAppStoreBuild;
 
   /// Update check, settings button and update dialog.
   static const bool selfUpdate = !isStore && !isAppStoreBuild;
-  static const bool firebasePush = appFlavor == 'oneme';
+  static const bool firebasePush = appFlavor == 'oneme' && !isAppStoreBuild;
 
   /// Device spoofing screen. Only the settings and login entry points are
   /// hidden; the connect handshake still sends the stored device profile.
   static const bool spoofUi = !isStore && !isAppStoreBuild;
   static const bool tokenLogin = false;
   static const bool qrLogin = false;
-  static const bool devTools = !isStore;
-  static const bool insecureTransport = !isStore;
-  static const bool trafficCapture = !isStore;
-  static const bool pranks = !isStore;
-  static const bool hiddenContentViewers = !isStore;
-  static const bool digitalId = !isStore;
-  static const bool ipGeoLookup = !isStore;
-  static const bool sessionCityLookup = !isStore;
+  static const bool devTools = !isTrimmed;
+  static const bool insecureTransport = !isTrimmed;
+  static const bool trafficCapture = !isTrimmed;
+  static const bool pranks = !isTrimmed;
+  static const bool hiddenContentViewers = !isTrimmed;
+  static const bool digitalId = !isTrimmed;
+  static const bool ipGeoLookup = !isTrimmed;
+  static const bool sessionCityLookup = !isTrimmed;
+
+  /// MAX server choice (host/port, Mincifry CA) and proxy. Must keep working
+  /// in the App Store build, so it does not depend on [devTools].
+  static const bool serverSelection = !isStore || isAppStoreBuild;
 
   // Pure versions of the gates above. dart-define values are fixed at
   // compile time, so tests check every combination through these.
