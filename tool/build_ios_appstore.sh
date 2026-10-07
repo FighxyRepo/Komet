@@ -10,20 +10,33 @@
 #    module is reachable only behind those const flags, so the AOT compiler
 #    tree-shakes it out of the binary.
 # 3. KOMET_APPSTORE_BUILD=1 makes ios/Podfile drop fjs even if it leaked.
-# pubspec.lock and pubspec_overrides.yaml are restored on exit.
+# 4. The Runner bundle id is switched to $APPSTORE_BUNDLE_ID (pw.komet.ios;
+#    RunnerTests to pw.komet.ios.RunnerTests) in project.pbxproj for this build
+#    only; regular builds keep ru.komet.app. The App Store provisioning profile
+#    must be issued for pw.komet.ios.
+# pubspec.lock, pubspec_overrides.yaml and project.pbxproj are restored on exit.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+APPSTORE_BUNDLE_ID=pw.komet.ios
+DEFAULT_BUNDLE_ID=ru.komet.app
+PBXPROJ=ios/Runner.xcodeproj/project.pbxproj
 OVERRIDES=pubspec_overrides.yaml
 if [[ -e $OVERRIDES ]]; then
   echo "error: $OVERRIDES already exists; remove it first" >&2
   exit 1
 fi
+if [[ -e $PBXPROJ.appstore-bak ]]; then
+  echo "error: $PBXPROJ.appstore-bak already exists; restore it first" >&2
+  exit 1
+fi
 cp pubspec.lock pubspec.lock.appstore-bak
+cp "$PBXPROJ" "$PBXPROJ.appstore-bak"
 
 restore() {
   rm -f "$OVERRIDES"
   mv -f pubspec.lock.appstore-bak pubspec.lock
+  mv -f "$PBXPROJ.appstore-bak" "$PBXPROJ"
   flutter pub get >/dev/null || true
 }
 trap restore EXIT
@@ -46,6 +59,18 @@ if [[ ${KOMET_APPSTORE_CHECK_ONLY:-0} == 1 ]]; then
   # Linux/CI smoke test: analyze the trimmed graph and stop before the iOS build.
   flutter analyze lib
   exit 0
+fi
+
+# Bundle id override (Runner and RunnerTests), reverted by restore().
+sed -i.sedtmp \
+  -e "s/PRODUCT_BUNDLE_IDENTIFIER = ${DEFAULT_BUNDLE_ID//./\\.};/PRODUCT_BUNDLE_IDENTIFIER = $APPSTORE_BUNDLE_ID;/" \
+  -e "s/PRODUCT_BUNDLE_IDENTIFIER = ${DEFAULT_BUNDLE_ID//./\\.}\\.RunnerTests;/PRODUCT_BUNDLE_IDENTIFIER = $APPSTORE_BUNDLE_ID.RunnerTests;/" \
+  "$PBXPROJ"
+rm -f "$PBXPROJ.sedtmp"
+if grep -q "PRODUCT_BUNDLE_IDENTIFIER = ${DEFAULT_BUNDLE_ID//./\\.}" "$PBXPROJ" \
+  || ! grep -q "PRODUCT_BUNDLE_IDENTIFIER = $APPSTORE_BUNDLE_ID;" "$PBXPROJ"; then
+  echo "error: failed to switch the bundle id to $APPSTORE_BUNDLE_ID" >&2
+  exit 1
 fi
 
 # flutter build runs pod install itself and inherits this.

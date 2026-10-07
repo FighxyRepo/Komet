@@ -100,9 +100,17 @@ JS engine. Exclusion is compile-time, in three layers:
 
 ### CI release (`.github/workflows/release-ios-appstore.yml`)
 
+**Bundle id.** The App Store build uses `pw.komet.ios`; every other iOS build keeps
+`ru.komet.app` from `project.pbxproj`. `tool/build_ios_appstore.sh` rewrites
+`PRODUCT_BUNDLE_IDENTIFIER` in `project.pbxproj` (Runner -> `pw.komet.ios`, RunnerTests ->
+`pw.komet.ios.RunnerTests`) for the duration of the build and restores the file on exit. There
+are no app extensions; any future extension must use `pw.komet.ios.<ext>` in the App Store build
+and be added to the script and the ExportOptions profile mapping. The App Store provisioning
+profile must be issued for `pw.komet.ios`.
+
 Manual `workflow_dispatch` (input `upload_to_testflight`, default false). It imports the
 distribution certificate into a temporary keychain, installs the profile (checked against the
-Runner bundle id in `project.pbxproj`, currently `ru.komet.app`), switches the Runner Release
+App Store bundle id `pw.komet.ios`, `APPSTORE_BUNDLE_ID` in the workflow), switches the Runner Release
 config to manual signing on the runner only, writes `ios/ExportOptions-appstore.plist`
 (`app-store-connect`, manual), runs `tool/build_ios_appstore.sh --export-options-plist=...`,
 uploads the IPA as an artifact and optionally sends it to TestFlight with `xcrun altool` and an
@@ -113,7 +121,7 @@ Repository secrets (the job fails early, naming any that are missing):
 |--------|---------|
 | `IOS_DIST_CERT_P12_BASE64` | Apple Distribution certificate + key, `.p12`, base64 |
 | `IOS_DIST_CERT_PASSWORD` | Password of that `.p12` |
-| `IOS_APPSTORE_PROFILE_BASE64` | App Store provisioning profile for the Runner bundle id, base64 |
+| `IOS_APPSTORE_PROFILE_BASE64` | App Store provisioning profile for `pw.komet.ios` (must match it), base64 |
 | `APPLE_TEAM_ID` | Apple Developer team id |
 | `ASC_KEY_ID` | App Store Connect API key id (TestFlight upload only) |
 | `ASC_ISSUER_ID` | App Store Connect issuer id (TestFlight upload only) |

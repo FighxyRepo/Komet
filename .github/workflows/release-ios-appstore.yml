@@ -13,6 +13,9 @@ on:
         default: false
 
 env:
+  # App Store bundle id; tool/build_ios_appstore.sh switches the Runner to it
+  # for the build (regular builds keep ru.komet.app). Keep both in sync.
+  APPSTORE_BUNDLE_ID: pw.komet.ios
   FLUTTER_VERSION: '3.47.0' # keep in sync with build-ios.yml
 
 permissions:
@@ -104,11 +107,9 @@ jobs:
           NAME=$(/usr/libexec/PlistBuddy -c 'Print :Name' "$RUNNER_TEMP/profile.plist")
           APP_ID=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$RUNNER_TEMP/profile.plist")
           PROFILE_BUNDLE_ID="${APP_ID#*.}"
-          # Bundle id of the Runner target, taken from the project itself.
-          BUNDLE_ID=$(grep -E 'PRODUCT_BUNDLE_IDENTIFIER = [^;]+;' ios/Runner.xcodeproj/project.pbxproj \
-            | grep -v RunnerTests | head -1 | sed -E 's/.*= ([^;]+);/\1/')
+          BUNDLE_ID="$APPSTORE_BUNDLE_ID"
           if [ "$PROFILE_BUNDLE_ID" != "$BUNDLE_ID" ]; then
-            echo "::error::Provisioning profile is for '$PROFILE_BUNDLE_ID' but the Runner bundle id is '$BUNDLE_ID'"
+            echo "::error::Provisioning profile is for '$PROFILE_BUNDLE_ID' but the App Store bundle id is '$BUNDLE_ID'"
             exit 1
           fi
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
