@@ -249,7 +249,10 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _onLogoTap() {
-    if (!BuildProfile.devTools) return;
+    if (BuildProfile.devTools) _openDebugMenuOnTaps();
+  }
+
+  void _openDebugMenuOnTaps() {
     _logoTapTimer?.cancel();
     _logoTapTimer = Timer(const Duration(milliseconds: 600), () {
       _logoTapCount = 0;

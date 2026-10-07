@@ -151,9 +151,10 @@ class CommandRegistry {
   void initialize() {
     if (_initialized) return;
     _initialized = true;
-    if (!BuildProfile.plugins) return;
-    PluginStore.instance.plugins.addListener(_rebuild);
-    _rebuild();
+    if (BuildProfile.plugins) {
+      PluginStore.instance.plugins.addListener(_rebuild);
+      _rebuild();
+    }
   }
 
   void _rebuild() {

@@ -141,8 +141,10 @@ Future<bool> openMaxRoute(
     case ':settings/dev/showroom':
     case ':settings/dev/threadsviewer':
     case ':settings/dev/integritylogsviewer':
-      if (!BuildProfile.devTools) break;
-      return _push(context, const DebugMenuScreen());
+      if (BuildProfile.devTools) {
+        return _push(context, const DebugMenuScreen());
+      }
+      break;
 
     case ':current':
     case ':link-intercept':

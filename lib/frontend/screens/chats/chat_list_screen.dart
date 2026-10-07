@@ -1920,8 +1920,14 @@ class _ChatListScreenState extends State<ChatListScreen>
       await openExternalUrl(context, url);
       return;
     }
-    if (!banner.isUpdate || !BuildProfile.selfUpdate) return;
+    // #***! положительный const if: в App Store сборке ветка и весь код
+    // самообновления вырезаются компилятором (ранний return так не умеет)
+    if (BuildProfile.selfUpdate) {
+      if (banner.isUpdate) await _checkUpdateFromBanner();
+    }
+  }
 
+  Future<void> _checkUpdateFromBanner() async {
     final result = await UpdateChecker.checkNow();
     if (!mounted) return;
     switch (result.status) {

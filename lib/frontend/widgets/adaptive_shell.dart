@@ -80,7 +80,10 @@ class _AdaptiveShellState extends State<AdaptiveShell> {
   }
 
   Future<void> _maybeCheckUpdate() async {
-    if (!BuildProfile.selfUpdate) return;
+    if (BuildProfile.selfUpdate) await _checkUpdateOnStartup();
+  }
+
+  Future<void> _checkUpdateOnStartup() async {
     if (DebugTest.enabled) return;
     final update = await UpdateChecker.check();
     if (update == null || !mounted) return;

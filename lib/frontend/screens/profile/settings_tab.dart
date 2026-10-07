@@ -228,7 +228,10 @@ class _SettingsTabState extends State<SettingsTab>
   }
 
   void _onVersionLabelTap() {
-    if (!BuildProfile.devTools) return;
+    if (BuildProfile.devTools) _toggleDebugMenuOnTaps();
+  }
+
+  void _toggleDebugMenuOnTaps() {
     _scheduleVersionSecretTapReset();
     setState(() {
       _versionSecretTapCount++;
@@ -431,7 +434,11 @@ class _SettingsTabState extends State<SettingsTab>
   }
 
   Future<void> _checkForUpdates() async {
-    if (!BuildProfile.selfUpdate || _isCheckingForUpdates) return;
+    if (BuildProfile.selfUpdate) await _runUpdateCheck();
+  }
+
+  Future<void> _runUpdateCheck() async {
+    if (_isCheckingForUpdates) return;
     setState(() => _isCheckingForUpdates = true);
 
     final result = await UpdateChecker.checkNow();
@@ -822,7 +829,7 @@ class _SettingsTabState extends State<SettingsTab>
                         children: <Widget>[...previousChildren, ?currentChild],
                       );
                     },
-                    child: _debugMenuVisible
+                    child: BuildProfile.devTools && _debugMenuVisible
                         ? KeyedSubtree(
                             key: const ValueKey('developers_settings_row'),
                             child: Padding(

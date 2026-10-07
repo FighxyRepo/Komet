@@ -71,6 +71,39 @@ the launcher-alias package from its own class name, so the icon switch survives 
 `android/app/src/store/google-services.json` must repeat the same id or the Google Services plugin
 fails the build.
 
+## iOS App Store build
+
+```bash
+tool/build_ios_appstore.sh            # = flutter build ipa --release --dart-define=is_appstore_build=true ...
+tool/check_appstore_kernel.sh         # Linux-friendly proof that excluded code is gone
+```
+
+Never build the App Store IPA with a bare `flutter build ipa`: the script is what removes the
+JS engine. Exclusion is compile-time, in three layers:
+
+1. **Native/JS engine.** The app never imports `fjs`; it goes through the local package
+   `packages/komet_js_engine` (`KometJsSandbox`). The script writes a temporary
+   `pubspec_overrides.yaml` that points `komet_js_engine` at `packages/komet_js_engine_stub`
+   (same API, no dependencies), so `fjs`/QuickJS is not resolved, has no `.symlinks` entry and
+   no pod. `pubspec.lock` is restored on exit. As a safety net `ios/Podfile` drops the `fjs`
+   pod when `KOMET_APPSTORE_BUILD=1` (exported by the script).
+2. **Dart code.** `BuildProfile.isAppStoreBuild` (`--dart-define=is_appstore_build=true`) makes
+   `isTrimmed` true, turning off `plugins`, `selfUpdate`, `spoofUi`, `devTools`,
+   `insecureTransport`, `trafficCapture`, `pranks`, `hiddenContentViewers`, `digitalId`,
+   `ipGeoLookup`, `sessionCityLookup`, `firebasePush`. The AOT tree-shaker drops everything only
+   reachable behind a false const.
+3. **Gate style matters.** Guard excluded code with a *positive* const if
+   (`if (BuildProfile.selfUpdate) await _runUpdateCheck();`, collection-`if`, `flag && x ? :`).
+   An early return (`if (!BuildProfile.selfUpdate) return; ...UpdateChecker...`) is NOT
+   eliminated by the compiler and keeps the module in the binary. `check_appstore_kernel.sh`
+   fails on such leaks.
+
+`BuildProfile.serverSelection` (MAX server host/port, Mincifry CA, proxy) stays on in the App
+Store build and is independent of `devTools`; the login screen "change server" / proxy sheets and
+the settings proxy sheet are the user-facing entry points. The handshake identity
+(`SpoofingService` constants, `_buildSessionOptions` in `api.dart`) is intentionally kept as-is
+in every build; only the spoof *UI* (`SpoofScreen`) is excluded.
+
 ## Review account
 
 Google Play reviewers cannot receive an SMS from the MAX server, so the store build ships one
