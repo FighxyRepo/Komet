@@ -1,0 +1,201 @@
+name: Release iOS (App Store)
+
+# Signed App Store IPA built through tool/build_ios_appstore.sh, so plugins
+# (JS engine), self-update, spoof UI and dev tooling are excluded at compile
+# time. Required secrets are listed in CLAUDE.md ("iOS App Store build").
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload_to_testflight:
+        description: 'Upload the IPA to TestFlight'
+        type: boolean
+        default: false
+
+env:
+  FLUTTER_VERSION: '3.47.0' # keep in sync with build-ios.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-ios-appstore
+  cancel-in-progress: false
+
+jobs:
+  appstore:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check secrets
+        env:
+          IOS_DIST_CERT_P12_BASE64: ${{ secrets.IOS_DIST_CERT_P12_BASE64 }}
+          IOS_DIST_CERT_PASSWORD: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
+          IOS_APPSTORE_PROFILE_BASE64: ${{ secrets.IOS_APPSTORE_PROFILE_BASE64 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+          UPLOAD: ${{ inputs.upload_to_testflight }}
+        run: |
+          missing=()
+          for name in IOS_DIST_CERT_P12_BASE64 IOS_DIST_CERT_PASSWORD IOS_APPSTORE_PROFILE_BASE64 APPLE_TEAM_ID; do
+            [ -n "${!name}" ] || missing+=("$name")
+          done
+          if [ "$UPLOAD" = "true" ]; then
+            for name in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8_BASE64; do
+              [ -n "${!name}" ] || missing+=("$name")
+            done
+          fi
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing repository secrets: ${missing[*]} (see CLAUDE.md, iOS App Store build)"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: 'stable'
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          targets: aarch64-apple-ios
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Pin kolibri crates
+        uses: ./.github/actions/pin-kolibri-crates
+
+      - name: Import distribution certificate
+        env:
+          IOS_DIST_CERT_P12_BASE64: ${{ secrets.IOS_DIST_CERT_P12_BASE64 }}
+          IOS_DIST_CERT_PASSWORD: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          CERT_PATH="$RUNNER_TEMP/dist_cert.p12"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo -n "$IOS_DIST_CERT_P12_BASE64" | base64 --decode -o "$CERT_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$RUNNER_TEMP/appstore-release.keychain-db"
+          security set-keychain-settings -lut 21600 "$RUNNER_TEMP/appstore-release.keychain-db"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$RUNNER_TEMP/appstore-release.keychain-db"
+          security import "$CERT_PATH" -P "$IOS_DIST_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$RUNNER_TEMP/appstore-release.keychain-db"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$RUNNER_TEMP/appstore-release.keychain-db" >/dev/null
+          security list-keychain -d user -s "$RUNNER_TEMP/appstore-release.keychain-db" $(security list-keychains -d user | sed 's/"//g')
+          rm -f "$CERT_PATH"
+
+      - name: Install provisioning profile
+        id: profile
+        env:
+          IOS_APPSTORE_PROFILE_BASE64: ${{ secrets.IOS_APPSTORE_PROFILE_BASE64 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          PP_PATH="$RUNNER_TEMP/appstore.mobileprovision"
+          echo -n "$IOS_APPSTORE_PROFILE_BASE64" | base64 --decode -o "$PP_PATH"
+          security cms -D -i "$PP_PATH" > "$RUNNER_TEMP/profile.plist"
+          UUID=$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$RUNNER_TEMP/profile.plist")
+          NAME=$(/usr/libexec/PlistBuddy -c 'Print :Name' "$RUNNER_TEMP/profile.plist")
+          APP_ID=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$RUNNER_TEMP/profile.plist")
+          PROFILE_BUNDLE_ID="${APP_ID#*.}"
+          # Bundle id of the Runner target, taken from the project itself.
+          BUNDLE_ID=$(grep -E 'PRODUCT_BUNDLE_IDENTIFIER = [^;]+;' ios/Runner.xcodeproj/project.pbxproj \
+            | grep -v RunnerTests | head -1 | sed -E 's/.*= ([^;]+);/\1/')
+          if [ "$PROFILE_BUNDLE_ID" != "$BUNDLE_ID" ]; then
+            echo "::error::Provisioning profile is for '$PROFILE_BUNDLE_ID' but the Runner bundle id is '$BUNDLE_ID'"
+            exit 1
+          fi
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          cp "$PP_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/$UUID.mobileprovision"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "bundle_id=$BUNDLE_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Configure manual signing
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          PROFILE_NAME: ${{ steps.profile.outputs.name }}
+        run: |
+          set -euo pipefail
+          # Release config of the Runner target only; the change lives in the
+          # runner workspace and is never committed.
+          ruby -rxcodeproj -e '
+            project = Xcodeproj::Project.open("ios/Runner.xcodeproj")
+            target = project.targets.find { |t| t.name == "Runner" }
+            config = target.build_configurations.find { |c| c.name == "Release" }
+            s = config.build_settings
+            s["CODE_SIGN_STYLE"] = "Manual"
+            s["DEVELOPMENT_TEAM"] = ENV.fetch("APPLE_TEAM_ID")
+            s["CODE_SIGN_IDENTITY"] = "Apple Distribution"
+            s["CODE_SIGN_IDENTITY[sdk=iphoneos*]"] = "Apple Distribution"
+            s["PROVISIONING_PROFILE_SPECIFIER"] = ENV.fetch("PROFILE_NAME")
+            project.save
+          '
+
+      - name: Write ExportOptions-appstore.plist
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          PROFILE_NAME: ${{ steps.profile.outputs.name }}
+          BUNDLE_ID: ${{ steps.profile.outputs.bundle_id }}
+        run: |
+          set -euo pipefail
+          PLIST=ios/ExportOptions-appstore.plist
+          /usr/libexec/PlistBuddy -c 'Clear dict' "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy \
+            -c 'Add :method string app-store-connect' \
+            -c 'Add :signingStyle string manual' \
+            -c "Add :teamID string $APPLE_TEAM_ID" \
+            -c 'Add :uploadSymbols bool true' \
+            -c 'Add :provisioningProfiles dict' \
+            -c "Add :provisioningProfiles:$BUNDLE_ID string $PROFILE_NAME" \
+            "$PLIST"
+
+      - name: Build App Store IPA
+        run: |
+          flutter config --no-enable-swift-package-manager
+          tool/build_ios_appstore.sh \
+            --export-options-plist=ios/ExportOptions-appstore.plist \
+            --build-number=${{ github.run_number }}
+
+      - name: Locate IPA
+        id: ipa
+        run: |
+          IPA=$(ls build/ios/ipa/*.ipa | head -1)
+          [ -f "$IPA" ] || { echo "::error::No IPA produced"; exit 1; }
+          echo "path=$IPA" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: komet-ios-appstore
+          path: ${{ steps.ipa.outputs.path }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload to TestFlight
+        if: inputs.upload_to_testflight
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+          IPA: ${{ steps.ipa.outputs.path }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          echo -n "$ASC_KEY_P8_BASE64" | base64 --decode \
+            -o "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+          xcrun altool --upload-app --type ios --file "$IPA" \
+            --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+
+      - name: Clean up signing material
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/appstore-release.keychain-db" 2>/dev/null || true
+          rm -f "$HOME"/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision
+          rm -rf "$HOME/.appstoreconnect/private_keys"
+          rm -f "$RUNNER_TEMP"/*.p12 "$RUNNER_TEMP"/*.mobileprovision "$RUNNER_TEMP/profile.plist"
+          rm -f ios/ExportOptions-appstore.plist

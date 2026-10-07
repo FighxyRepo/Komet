@@ -98,6 +98,27 @@ JS engine. Exclusion is compile-time, in three layers:
    eliminated by the compiler and keeps the module in the binary. `check_appstore_kernel.sh`
    fails on such leaks.
 
+### CI release (`.github/workflows/release-ios-appstore.yml`)
+
+Manual `workflow_dispatch` (input `upload_to_testflight`, default false). It imports the
+distribution certificate into a temporary keychain, installs the profile (checked against the
+Runner bundle id in `project.pbxproj`, currently `ru.komet.app`), switches the Runner Release
+config to manual signing on the runner only, writes `ios/ExportOptions-appstore.plist`
+(`app-store-connect`, manual), runs `tool/build_ios_appstore.sh --export-options-plist=...`,
+uploads the IPA as an artifact and optionally sends it to TestFlight with `xcrun altool` and an
+App Store Connect API key. The keychain, profile and key are removed in an `always()` step.
+Repository secrets (the job fails early, naming any that are missing):
+
+| Secret | Content |
+|--------|---------|
+| `IOS_DIST_CERT_P12_BASE64` | Apple Distribution certificate + key, `.p12`, base64 |
+| `IOS_DIST_CERT_PASSWORD` | Password of that `.p12` |
+| `IOS_APPSTORE_PROFILE_BASE64` | App Store provisioning profile for the Runner bundle id, base64 |
+| `APPLE_TEAM_ID` | Apple Developer team id |
+| `ASC_KEY_ID` | App Store Connect API key id (TestFlight upload only) |
+| `ASC_ISSUER_ID` | App Store Connect issuer id (TestFlight upload only) |
+| `ASC_KEY_P8_BASE64` | App Store Connect API key `AuthKey_*.p8`, base64 (TestFlight upload only) |
+
 `BuildProfile.serverSelection` (MAX server host/port, Mincifry CA, proxy) stays on in the App
 Store build and is independent of `devTools`; the login screen "change server" / proxy sheets and
 the settings proxy sheet are the user-facing entry points. The handshake identity
